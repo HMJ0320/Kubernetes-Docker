@@ -1,0 +1,173 @@
+#include "../include/container.h"
+
+//static int container_create_root_directory() {
+//
+//}
+
+static int container_mount() {
+    if (mount("proc", "/proc", "proc", 0, NULL) == -1) {
+        perror("Failed to mount proc");
+        return 1;
+    }
+    if (mount("sysfs", "/sys", "sysfs", 0, NULL) == -1) {
+        perror("Failed to mount sysfs");
+        return 1;
+    }
+    if (mount("devtmpfs", "/dev", "devtmpfs", MS_MGC_VAL, NULL) == -1) {
+        perror("Failed to mount devtmpfs");
+        return 1;
+    }
+    return 0;
+}
+
+int child_func(void * arg) {
+    (void)arg;
+    printf("Child process (Container) started with PID: %d\n", getpid());
+    return 0;
+}
+
+char * container_stack(container_t * container) {
+    printf("Enter container size in Mb: ");
+    char * stack_size_char = cli_input();
+    size_t stack_size = atoi(stack_size_char);
+    // meed to do some input check here to make sure that the stack size was indeed a number
+    memccpy(&container->container_size, &stack_size, 1, sizeof(size_t));
+    printf("Container size: %ld bytes\n", MEGABYTE*stack_size);
+    char * child_stack = (char *)malloc(stack_size*MEGABYTE);
+    container->stack_front = child_stack;
+    if (NULL == child_stack) {
+        perror("Failed to allocate for container stack.\n");
+        free(stack_size_char);
+        stack_size_char = NULL;
+        return NULL;
+    }
+    char * stack_top = child_stack + (stack_size*MEGABYTE);
+    container->stack_end = stack_top;
+    free(stack_size_char);
+    stack_size_char = NULL;
+    return stack_top;
+}
+
+static pid_t container_clone(container_t * container) {
+    char * stack_top = container_stack(container);
+    if (NULL == stack_top) {
+        perror("Failed to allocate stack.\n");
+        return -1;
+    }
+    pid_t pid = clone(child_func, stack_top, SIGCHLD | CLONE_NEWPID | CLONE_NEWUTS | CLONE_NEWNS | CLONE_NEWIPC | CLONE_NEWNET, NULL);
+    memccpy(&container->child_pid, &pid, 1, sizeof(pid_t));
+    if (-1 == pid) {
+        perror("Failed to clone.\n");
+        free(container);
+        container = NULL;
+        return -1;
+    }
+    return pid;
+}
+
+int container_init(hashtable_t * hashtable) {
+    container_t * container = (container_t *)malloc(sizeof(container_t));
+    printf("Enter container name: ");
+    char * container_name = cli_input();
+    pid_t pid_temp = container_clone(container);
+    printf("parent pid: %d\n", getpid()); // potentially get rid of
+    printf("child pid: %d\n", pid_temp); // potentially get rid of
+    memccpy(&container->child_pid, &pid_temp, 1, sizeof(pid_t));
+    hashtable_insert(hashtable, container_name, container, 's');
+    free(container_name);
+    container_name = NULL;
+    return 0;
+}
+
+int container_delete(hashtable_t * hashtable) {
+    printf("Enter container name to delete: ");
+    char * container_name = cli_input();
+    container_t * container = hashtable_search(hashtable, container_name, 's');
+    if (NULL == container) {
+        printf("Container does not exist.\n");
+    } else {
+        int killed = kill(container->child_pid, SIGKILL); // Try using SIGTERM or SIGKILL
+        if (-1 == killed) {
+            printf("Container '%s' could not be killed.\n", container_name);
+        } else {
+            printf("Container '%s' was killed.\n", container_name);
+            // Wait for the child process to terminate and prevent zombie processes
+            int status;
+            pid_t wpid = waitpid(container->child_pid, &status, 0);  // Wait for child to finish
+            if (-1 == wpid) {
+                perror("waitpid failed");
+            } else {
+                printf("Child process with PID %d has terminated.\n", container->child_pid);
+            }
+        }
+        if (container) {
+            if (container->stack_front) {
+                free(container->stack_front);
+                container->stack_front = NULL;
+            }
+            free(container);
+            container = NULL;
+        }
+        hashtable_remove(hashtable, container_name, 's');
+    }
+    free(container_name);
+    container_name = NULL;
+    return 0;
+}
+
+void container_list_all(hashtable_t * hashtable) {
+    printf("Containers:\n");
+    for (int i = 0; i < TABLE_SIZE; i++) {
+        item_t * item = hashtable->table[i];
+        while (item) {
+            printf("container name: %s\n", (char *)item->key);
+            item = item->next;
+        }
+    }
+}
+
+void container_cleanup(cli_t * cli) {
+    hashtable_t * hashtable = cli->data1;
+    for (int i = 0; i < TABLE_SIZE; i++) {
+        item_t * item = hashtable->table[i];
+        while (item) {
+            container_t * container = item->value;
+            free(container->stack_front);
+            container->stack_front = NULL;
+            free(container);
+            item = item->next;
+        }
+    }
+    hashtable_free(cli->data1);
+    cli->data1 = NULL;
+    hashtable_free(cli->data2);
+    cli->data2 = NULL;
+    linkedlist_free(cli->data3);
+    cli->data3 = NULL;
+}
+
+// Need to create a container for the network namespace that will assign each container with a new incremented ip in the network so a maximum of 254 ips including the host computer
+
+void container_commands(char * command, cli_t * cli) {
+    if (NULL == cli->data1) {
+        hashtable_t * containers = hashtable_init();
+        cli->data1 = containers;
+    }
+    if (NULL == cli->data2) {
+        hashtable_t * network = hashtable_init();
+        cli->data2 = network;
+    }
+    if (strcmp(command, "help") == 0) {
+        printf("Commands:");
+    } else if (strcmp(command, "create_container") == 0) {
+        container_init(cli->data1);
+        sleep(1);
+    } else if (strcmp(command, "delete_container") == 0) {
+        container_delete(cli->data1);
+    } else if (strcmp(command, "list_containers") == 0) {
+        container_list_all(cli->data1);
+    } else if (strcmp(command, "exit") == 0) {
+        container_cleanup(cli);
+    }
+
+}
