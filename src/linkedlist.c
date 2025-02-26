@@ -92,6 +92,7 @@ void linkedlist_free(linkedlist_t * linkedlist) {
         for (size_t i = 0; i < linkedlist->count; i++) {
             node_t * next = node->next;
             free(node);
+            node = NULL;
             node = next;
         }
     }

@@ -1,10 +1,10 @@
 #include "../include/container.h"
 
-//static int container_create_root_directory() {
-//
-//}
+static int container_create_root_directory() {
 
-static int container_mount() {
+}
+
+static int container_mount(void) {
     if (mount("proc", "/proc", "proc", 0, NULL) == -1) {
         perror("Failed to mount proc");
         return 1;
@@ -138,6 +138,7 @@ void container_cleanup(cli_t * cli) {
             item = item->next;
         }
     }
+    linkedlist_free_data(cli->data3);
     hashtable_free(cli->data1);
     cli->data1 = NULL;
     hashtable_free(cli->data2);
@@ -156,6 +157,19 @@ void container_commands(char * command, cli_t * cli) {
     if (NULL == cli->data2) {
         hashtable_t * network = hashtable_init();
         cli->data2 = network;
+    }
+    if (NULL == cli->data3) {
+        network_interface_t * network_interface = network_get_host_information();
+        linkedlist_t * linkedlist = network_get_free_ips(network_interface); 
+        cli->data3 = linkedlist;
+    } else { // this is strictly for debugging and not what we want on the program
+        linkedlist_t * linkedlist = cli->data3;
+        node_t * node = linkedlist->head->next;
+        for (size_t i = 0; i < linkedlist->count; i++) {
+            network_ip_veth_t * niv = (network_ip_veth_t *)node->data;
+            printf("ip: %s, veth: %d\n", niv->ip, niv->veth_number);
+            node = node->next;
+        }
     }
     if (strcmp(command, "help") == 0) {
         printf("Commands:");

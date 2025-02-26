@@ -1,11 +1,12 @@
 #include "../include/network.h"
 
 // creates the network namespace and needs to be used in child_func
-void network_create_namespace() {
+int network_create_namespace() {
     if (unshare(CLONE_NEWNET) == 1) {
         perror("Failed to create network namespace.\n");
-        return -1;
+        return 1;
     }
+    return 0;
 }
 
 //
@@ -13,11 +14,11 @@ void network_configure() {
 
 }
 
-void network_configure_host_ip(network_ip_veth_t * network_ip_veth) {
-    char cmd[256];
-    snprintf(cmd, sizeof(cmd), "ip addr add %s/%d dev veth%d", network_ip_veth->ip, /subnet, network_ip_veth->veth_number - 1);
-    system(cmd);
-}
+//void network_configure_host_ip(network_ip_veth_t * network_ip_veth) {
+//    char cmd[256];
+//    snprintf(cmd, sizeof(cmd), "ip addr add %s/%d dev veth%d", network_ip_veth->ip, /subnet, network_ip_veth->veth_number - 1);
+//    system(cmd);
+//}
 
 void network_configure_host_veth(network_ip_veth_t * network_ip_veth) {
     char cmd[256];
@@ -27,7 +28,7 @@ void network_configure_host_veth(network_ip_veth_t * network_ip_veth) {
 
 // assigns the virtual ethernet but more than likely should create veth in pairs with the ip
 void network_create_virtual_ethernet(network_interface_t * network_interface, network_ip_veth_t * network_ip_veth_t) {
-
+    
 }
 
 // create a function that recieves the host network information
@@ -43,7 +44,7 @@ network_interface_t * network_get_host_information(void) {
     // Get the list of all network interfaces
     if (getifaddrs(&ifaddr) == -1) {
         perror("getifaddrs");
-        return 1;
+        return NULL;
     }
 
     // Loop through each interface
@@ -107,10 +108,11 @@ linkedlist_t * network_get_free_ips(network_interface_t * network_interface) {
     base_ip.s_addr = base_ip.s_addr & subnet_mask.s_addr;
 
     unsigned int max_ip = (~ntohl(subnet_mask.s_addr) & 0x00FFFFFF);
-    max_ip = 5;
+    max_ip = 10;
     printf("max ip: %d\n", max_ip);
+    int veth = 1;
     //multithread this so that it can ping multiple ips at once
-    for (unsigned int i = 1; i < max_ip; i++) {  // Exclude network (0) and broadcast (255)
+    for (unsigned int i= 1; i < max_ip; i++) {  // Exclude network (0) and broadcast (255)
         network_get_next_ip(&base_ip, i, &test_ip);
         char ip_str[INET_ADDRSTRLEN];
         inet_ntop(AF_INET, &test_ip, ip_str, INET_ADDRSTRLEN);
@@ -119,9 +121,10 @@ linkedlist_t * network_get_free_ips(network_interface_t * network_interface) {
         if (!network_ip_in_use(ip_str)) {
             network_ip_veth_t * network_ip_veth = (network_ip_veth_t *)malloc(sizeof(network_ip_veth_t));
             memcpy(network_ip_veth->ip, ip_str, INET_ADDRSTRLEN);
-            network_ip_veth->veth_number = i;
+            network_ip_veth->veth_number = veth;
             linkedlist_append(linkedlist, network_ip_veth);
             printf("Found free IP: %s\n", ip_str);
+            veth += 2;
         }
     }
     return linkedlist;
