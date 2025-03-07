@@ -1,7 +1,7 @@
 #include "../include/container.h"
 
 static int container_create_root_directory() {
-
+    return 0;
 }
 
 static int container_mount(void) {
@@ -20,9 +20,19 @@ static int container_mount(void) {
     return 0;
 }
 
-int child_func(void * arg) {
-    (void)arg;
-    printf("Child process (Container) started with PID: %d\n", getpid());
+int child_func(void *arg) {
+    if (setsid() == -1) {
+        perror("setsid failed");
+        exit(1);
+    }
+
+    network_ip_veth_t * network_ip_veth = (network_ip_veth_t *)arg;
+
+    while (1) {
+        //printf("Container PID %d running independently...\n", getpid());
+        sleep(100);
+    }
+
     return 0;
 }
 
@@ -48,13 +58,18 @@ char * container_stack(container_t * container) {
     return stack_top;
 }
 
-static pid_t container_clone(container_t * container) {
+static pid_t container_clone(container_t * container, cli_t * cli, char * container_name) {
     char * stack_top = container_stack(container);
     if (NULL == stack_top) {
         perror("Failed to allocate stack.\n");
         return -1;
     }
-    pid_t pid = clone(child_func, stack_top, SIGCHLD | CLONE_NEWPID | CLONE_NEWUTS | CLONE_NEWNS | CLONE_NEWIPC | CLONE_NEWNET, NULL);
+    network_ip_veth_t * network_ip_veth = linkedlist_popleft(cli->data3);
+    printf("Found free Host: %s, IP: %s, VETH: %d, Subnet: %d\n", network_ip_veth->host, network_ip_veth->ip, network_ip_veth->veth_number - 1, network_ip_veth->subnet);
+    network_ip_veth_t * network_bridge = hashtable_search(cli->data2, "br", 's');
+    pid_t pid = clone(child_func, stack_top, SIGCHLD | CLONE_NEWUTS | CLONE_NEWNS | CLONE_NEWIPC | CLONE_NEWNET, network_ip_veth); // add this for pid to be one in container CLONE_NEWPID
+    network_setup_host(network_ip_veth, pid, container_name, network_bridge);
+    hashtable_insert(cli->data2, container_name, network_ip_veth, 's');
     memccpy(&container->child_pid, &pid, 1, sizeof(pid_t));
     if (-1 == pid) {
         perror("Failed to clone.\n");
@@ -65,11 +80,12 @@ static pid_t container_clone(container_t * container) {
     return pid;
 }
 
-int container_init(hashtable_t * hashtable) {
+int container_init(cli_t * cli) {
+    hashtable_t * hashtable = (hashtable_t *)cli->data1;
     container_t * container = (container_t *)malloc(sizeof(container_t));
     printf("Enter container name: ");
     char * container_name = cli_input();
-    pid_t pid_temp = container_clone(container);
+    pid_t pid_temp = container_clone(container, cli, container_name);
     printf("parent pid: %d\n", getpid()); // potentially get rid of
     printf("child pid: %d\n", pid_temp); // potentially get rid of
     memccpy(&container->child_pid, &pid_temp, 1, sizeof(pid_t));
@@ -79,19 +95,27 @@ int container_init(hashtable_t * hashtable) {
     return 0;
 }
 
-int container_delete(hashtable_t * hashtable) {
+// need to add the cli and make it so that we append the network interface onto the end of the linkedlist of free addresses
+int container_delete(hashtable_t * containers, hashtable_t * container_networks) {
     printf("Enter container name to delete: ");
     char * container_name = cli_input();
-    container_t * container = hashtable_search(hashtable, container_name, 's');
+    container_t * container = hashtable_search(containers, container_name, 's');
+    network_ip_veth_t * container_network = hashtable_search(container_networks, container_name, 's');
     if (NULL == container) {
         printf("Container does not exist.\n");
     } else {
+        char cmd[256];
+        snprintf(cmd, sizeof(cmd), "sudo ip netns delete %s", container_name);
+        if (system(cmd) != 0) {
+            perror("Failed to remove netns name\n");
+            return 0;
+        }
+        network_remove_veth(container_network);
         int killed = kill(container->child_pid, SIGKILL); // Try using SIGTERM or SIGKILL
         if (-1 == killed) {
             printf("Container '%s' could not be killed.\n", container_name);
         } else {
             printf("Container '%s' was killed.\n", container_name);
-            // Wait for the child process to terminate and prevent zombie processes
             int status;
             pid_t wpid = waitpid(container->child_pid, &status, 0);  // Wait for child to finish
             if (-1 == wpid) {
@@ -108,7 +132,12 @@ int container_delete(hashtable_t * hashtable) {
             free(container);
             container = NULL;
         }
-        hashtable_remove(hashtable, container_name, 's');
+        hashtable_remove(containers, container_name, 's');
+        hashtable_remove(container_networks, container_name, 's');
+        if (container_network) {
+            free(container_network);
+            container_network = NULL;
+        }
     }
     free(container_name);
     container_name = NULL;
@@ -145,9 +174,14 @@ void container_cleanup(cli_t * cli) {
     cli->data2 = NULL;
     linkedlist_free(cli->data3);
     cli->data3 = NULL;
+    
+    char cmd[256];
+    snprintf(cmd, sizeof(cmd), "sudo ip link delete br0");
+    if (system(cmd) != 0) {
+        perror("Failed to remove bridge\n");
+        return 0;
+    }
 }
-
-// Need to create a container for the network namespace that will assign each container with a new incremented ip in the network so a maximum of 254 ips including the host computer
 
 void container_commands(char * command, cli_t * cli) {
     if (NULL == cli->data1) {
@@ -162,26 +196,20 @@ void container_commands(char * command, cli_t * cli) {
         network_interface_t * network_interface = network_get_host_information();
         linkedlist_t * linkedlist = network_get_free_ips(network_interface); 
         cli->data3 = linkedlist;
-    } else { // this is strictly for debugging and not what we want on the program
-        linkedlist_t * linkedlist = cli->data3;
-        node_t * node = linkedlist->head->next;
-        for (size_t i = 0; i < linkedlist->count; i++) {
-            network_ip_veth_t * niv = (network_ip_veth_t *)node->data;
-            printf("ip: %s, veth: %d\n", niv->ip, niv->veth_number);
-            node = node->next;
-        }
     }
-    if (strcmp(command, "help") == 0) {
-        printf("Commands:");
-    } else if (strcmp(command, "create_container") == 0) {
-        container_init(cli->data1);
-        sleep(1);
+    if (NULL == hashtable_search(cli->data2, "br", 's')) {
+        network_ip_veth_t * network_bridge = network_create_bridge(cli->data3);
+        hashtable_insert(cli->data2, "br", network_bridge, 's');
+    }
+    
+    // Commands handling
+    if (strcmp(command, "create_container") == 0) {
+        container_init(cli);
     } else if (strcmp(command, "delete_container") == 0) {
-        container_delete(cli->data1);
+        container_delete(cli->data1, cli->data2);
     } else if (strcmp(command, "list_containers") == 0) {
         container_list_all(cli->data1);
     } else if (strcmp(command, "exit") == 0) {
         container_cleanup(cli);
     }
-
 }

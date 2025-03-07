@@ -175,85 +175,47 @@ void network_get_next_ip(struct in_addr *base_ip, unsigned int increment, struct
 
 static int network_ip_in_use(const char *ip) {
     char command[128];
-    snprintf(command, sizeof(command), "ping -c %d -W %d %s > /dev/null 2>&1", 2, 1, ip);
+    snprintf(command, sizeof(command), "ping -c %d -W %d %s > /dev/null 2>&1", 3, 1, ip);
     return 0 == system(command);
 }
 
-pthread_mutex_t list_mutex = PTHREAD_MUTEX_INITIALIZER;
+// need to add multithreading here so that ping of network can happen faster
+linkedlist_t * network_get_free_ips(network_interface_t *network_interface) {
+    linkedlist_t * linkedlist = linkedlist_init();
+    struct in_addr base_ip;
+    struct in_addr subnet_mask;
+    struct in_addr test_ip;
 
-// Function to be executed by each thread
-void* thread_function(void* arg) {
-    thread_data_t *data = (thread_data_t*)arg;
-    struct in_addr base_ip, subnet_mask, test_ip;
-    unsigned int i;
-    int veth = data->veth_number;
-    
-    // Convert base IP and subnet mask from strings to in_addr
-    inet_pton(AF_INET, data->network_interface->ip, &base_ip);
-    inet_pton(AF_INET, data->network_interface->subnet, &subnet_mask);
-    
+    printf("ip: %s, subnet: %s\n", network_interface->ip, network_interface->subnet);
+    inet_pton(AF_INET, network_interface->ip, &base_ip);
+    inet_pton(AF_INET, network_interface->subnet, &subnet_mask);
+
     base_ip.s_addr = base_ip.s_addr & subnet_mask.s_addr;
-    
+
+    int cidr = network_get_cidr_from_subnet_mask(subnet_mask);
+
     unsigned int max_ip = (~ntohl(subnet_mask.s_addr) & 0x00FFFFFF);
+    unsigned int subnet = (~ntohl(subnet_mask.s_addr) & 0x00FFFFFF);
     //max_ip = 10; // Adjust if you want more IPs
-    
-    
-    for (i = data->start_ip; i < data->end_ip; i++) {
+    printf("max ip: %d\n", max_ip);
+    int veth = 1;
+
+    for (unsigned int i = 1; i < max_ip; i++) {
         network_get_next_ip(&base_ip, i, &test_ip);
         char ip_str[INET_ADDRSTRLEN];
         inet_ntop(AF_INET, &test_ip, ip_str, INET_ADDRSTRLEN);
 
         if (!network_ip_in_use(ip_str)) {
             network_ip_veth_t *network_ip_veth = (network_ip_veth_t *)malloc(sizeof(network_ip_veth_t));
-            memcpy(network_ip_veth->host, data->network_interface->ip, INET_ADDRSTRLEN);
+            memcpy(network_ip_veth->host, network_interface->ip, INET_ADDRSTRLEN);
             memcpy(network_ip_veth->ip, ip_str, INET_ADDRSTRLEN);
-            network_ip_veth->subnet = network_get_cidr_from_subnet_mask(subnet_mask);
+            network_ip_veth->subnet = cidr;
             network_ip_veth->veth_number = veth;
+            linkedlist_append(linkedlist, network_ip_veth);
             veth += 2;
 
-            // Thread-safe insertion into the linked list
-            pthread_mutex_lock(&list_mutex);
-            linkedlist_append(data->linkedlist, network_ip_veth);
-            pthread_mutex_unlock(&list_mutex);
-
-            printf("Thread found free Host: %s, IP: %s, VETH: %d, Subnet: %d\n", network_ip_veth->host, network_ip_veth->ip, network_ip_veth->veth_number, network_ip_veth->subnet);
+            printf("Found free Host: %s, IP: %s, VETH: %d, Subnet: %d\n", network_ip_veth->host, network_ip_veth->ip, network_ip_veth->veth_number, network_ip_veth->subnet);
         }
     }
-    return NULL;
-}
-
-linkedlist_t* network_get_free_ips(network_interface_t *network_interface) {
-    linkedlist_t * linkedlist = linkedlist_init();
-    pthread_t threads[MAX_THREADS];
-    thread_data_t thread_data[MAX_THREADS];
-    
-    struct in_addr base_ip, subnet_mask;
-    inet_pton(AF_INET, network_interface->ip, &base_ip);
-    inet_pton(AF_INET, network_interface->subnet, &subnet_mask);
-    
-    base_ip.s_addr = base_ip.s_addr & subnet_mask.s_addr;
-
-    unsigned int max_ip = (~ntohl(subnet_mask.s_addr) & 0x00FFFFFF);
-    //max_ip = 10; // Adjust if you want more IPs
-    printf("IPs to check: %d\n", max_ip);
-    int veth = 1;
-    unsigned int chunk_size = max_ip / MAX_THREADS;
-    printf("chunk size: %d\n", chunk_size);
-    // Create threads and divide the work
-    for (int i = 0; i < MAX_THREADS; i++) {
-        thread_data[i].network_interface = network_interface;
-        thread_data[i].linkedlist = linkedlist;
-        thread_data[i].veth_number = veth + (i*chunk_size);
-        thread_data[i].start_ip = i * chunk_size + 1; // Avoid starting from 0
-        thread_data[i].end_ip = (i == MAX_THREADS - 1) ? max_ip : (i + 1) * chunk_size;  // Last thread handles the remaining IPs
-        
-        pthread_create(&threads[i], NULL, thread_function, &thread_data[i]);
-    }
-    
-    // Wait for all threads to complete
-    for (int i = 0; i < MAX_THREADS; i++) {
-        pthread_join(threads[i], NULL);
-    }
-
     return linkedlist;
 }

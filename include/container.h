@@ -34,9 +34,9 @@ int child_func(void * arg);
 
 char * container_stack(container_t * container);
 
-int container_init(hashtable_t * hashtable);
+int container_init(cli_t * cli);
 
-int container_delete(hashtable_t * hashtable);
+int container_delete(hashtable_t * containers, hashtable_t * container_networks);
 
 void container_cleanup(cli_t * cli);
 
