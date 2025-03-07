@@ -1,0 +1,8 @@
+{
+    "files.associations": {
+        "syscall.h": "c",
+        "types.h": "c",
+        "stdio.h": "c",
+        "stdlib.h": "c"
+    }
+}
