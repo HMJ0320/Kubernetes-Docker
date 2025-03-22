@@ -182,7 +182,7 @@ static int network_ip_in_use(const char *ip) {
 pthread_mutex_t list_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 // Function to be executed by each thread
-void* thread_function(void* arg) {
+void * thread_function(void* arg) {
     thread_data_t *data = (thread_data_t*)arg;
     struct in_addr base_ip, subnet_mask, test_ip;
     unsigned int i;
@@ -194,7 +194,7 @@ void* thread_function(void* arg) {
     
     base_ip.s_addr = base_ip.s_addr & subnet_mask.s_addr;
     
-    unsigned int max_ip = (~ntohl(subnet_mask.s_addr) & 0x00FFFFFF);
+    //unsigned int max_ip = (~ntohl(subnet_mask.s_addr) & 0x00FFFFFF);
     //max_ip = 10; // Adjust if you want more IPs
     
     
@@ -204,7 +204,7 @@ void* thread_function(void* arg) {
         inet_ntop(AF_INET, &test_ip, ip_str, INET_ADDRSTRLEN);
 
         if (!network_ip_in_use(ip_str)) {
-            network_ip_veth_t *network_ip_veth = (network_ip_veth_t *)malloc(sizeof(network_ip_veth_t));
+            network_ip_veth_t * network_ip_veth = (network_ip_veth_t *)malloc(sizeof(network_ip_veth_t));
             memcpy(network_ip_veth->host, data->network_interface->ip, INET_ADDRSTRLEN);
             memcpy(network_ip_veth->ip, ip_str, INET_ADDRSTRLEN);
             network_ip_veth->subnet = network_get_cidr_from_subnet_mask(subnet_mask);
@@ -222,7 +222,7 @@ void* thread_function(void* arg) {
     return NULL;
 }
 
-linkedlist_t* network_get_free_ips(network_interface_t *network_interface) {
+linkedlist_t * network_get_free_ips(network_interface_t *network_interface) {
     linkedlist_t * linkedlist = linkedlist_init();
     pthread_t threads[MAX_THREADS];
     thread_data_t thread_data[MAX_THREADS];
