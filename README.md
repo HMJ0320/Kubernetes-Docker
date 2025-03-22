@@ -1,6 +1,7 @@
-# Kubernetes-Docker
+# Self created Container Creation & Management Tool
 ## Description
 - Ths project is an independent project in order to replicate container creation such as Docker and container managment such as Kubernetes
+- The project was created mainly to learn more about namespaces and cgroups and how linux creates and manages proesses which can be inclusive of containers
 ## Installation Instructions
 - This project requires the following
   1. Linux Ubuntu
