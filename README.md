@@ -13,6 +13,7 @@
   3. run command 'make' to link libraries and create binary
   4. cd bin
   5. run application with 'sudo ./container'
+  6. The application runs in the cli and runs as a cli tool
 ## Usage
 - Install application as above
 - run application with sudo privelidges
