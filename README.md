@@ -30,7 +30,11 @@
 4. Assign IP to container so host device can reach
 5. Assign IP to bridge on host to connect all containers on host device
 ## Implementation
-- Need to be added
+- Created independent libraries using standard C libraries:
+  1. Hashtables
+  2. LinkedList
+  3. CLI
+- Need to add more
 ## Notes
 - Application needs sudo permissions because cloning the root process requires admin access
 - Potentially explore Podman implementation of Containers as it does not require root access
