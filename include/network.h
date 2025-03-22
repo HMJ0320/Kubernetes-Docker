@@ -41,8 +41,8 @@ typedef struct network_ip_veth_t {
 
 // this is 
 typedef struct thread_data_t{
-    network_interface_t *network_interface;
-    linkedlist_t *linkedlist;
+    network_interface_t * network_interface;
+    linkedlist_t * linkedlist;
     int veth_number;
     unsigned int start_ip;
     unsigned int end_ip;

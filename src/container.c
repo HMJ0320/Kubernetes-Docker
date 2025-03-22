@@ -1,35 +1,38 @@
 #include "../include/container.h"
 
-static int container_create_root_directory() {
-    return 0;
-}
+//static int container_mount(void) {
+//    if (mount("proc", "/proc", "proc", 0, NULL) == -1) {
+//        perror("Failed to mount proc");
+//        return 1;
+//    }
+//    if (mount("sysfs", "/sys", "sysfs", 0, NULL) == -1) {
+//        perror("Failed to mount sysfs");
+//        return 1;
+//    }
+//    if (mount("devtmpfs", "/dev", "devtmpfs", MS_MGC_VAL, NULL) == -1) {
+//        perror("Failed to mount devtmpfs");
+//        return 1;
+//    }
+//    return 0;
+//}
 
-static int container_mount(void) {
-    if (mount("proc", "/proc", "proc", 0, NULL) == -1) {
-        perror("Failed to mount proc");
-        return 1;
+int child_func(void * arg) {
+    if (NULL == arg) {
+        printf("Arguments have been passed to child process.\n");
     }
-    if (mount("sysfs", "/sys", "sysfs", 0, NULL) == -1) {
-        perror("Failed to mount sysfs");
-        return 1;
-    }
-    if (mount("devtmpfs", "/dev", "devtmpfs", MS_MGC_VAL, NULL) == -1) {
-        perror("Failed to mount devtmpfs");
-        return 1;
-    }
-    return 0;
-}
 
-int child_func(void *arg) {
+    //if (mount("proc", "/proc", "proc", 0, NULL) == -1) {
+    //    perror("mount /proc failed");
+    //    exit(1);
+    //}
+
     if (setsid() == -1) {
         perror("setsid failed");
         exit(1);
     }
 
-    network_ip_veth_t * network_ip_veth = (network_ip_veth_t *)arg;
-
     while (1) {
-        //printf("Container PID %d running independently...\n", getpid());
+        printf("Container PID %d running independently...\n", getpid());
         sleep(100);
     }
 
@@ -155,7 +158,7 @@ void container_list_all(hashtable_t * hashtable) {
     }
 }
 
-void container_cleanup(cli_t * cli) {
+void container_free_containers(cli_t * cli) {
     hashtable_t * hashtable = cli->data1;
     for (int i = 0; i < TABLE_SIZE; i++) {
         item_t * item = hashtable->table[i];
@@ -167,20 +170,53 @@ void container_cleanup(cli_t * cli) {
             item = item->next;
         }
     }
-    linkedlist_free_data(cli->data3);
     hashtable_free(cli->data1);
     cli->data1 = NULL;
-    hashtable_free(cli->data2);
-    cli->data2 = NULL;
-    linkedlist_free(cli->data3);
-    cli->data3 = NULL;
-    
-    char cmd[256];
-    snprintf(cmd, sizeof(cmd), "sudo ip link delete br0");
-    if (system(cmd) != 0) {
-        perror("Failed to remove bridge\n");
-        return 0;
+}
+
+void container_free_bridges_and_veths(cli_t * cli) {
+    hashtable_t * bridges_and_ips = cli->data2;
+    for (int i = 0; i < TABLE_SIZE; i++) {
+        item_t * item = bridges_and_ips->table[i];
+        while (item) {
+            network_ip_veth_t * network_ip_veth = item->value;
+            network_remove_veth(network_ip_veth);
+            item = item->next;
+        }
     }
+    if (bridges_and_ips != NULL) {
+        hashtable_free_values(cli->data2);
+        hashtable_free(cli->data2);
+    }
+    cli->data2 = NULL;
+}
+
+void container_free_ips(cli_t * cli) {
+    linkedlist_t * linkedlist = cli->data3;
+    if (linkedlist != NULL) {
+        linkedlist_free_data(cli->data3);
+        linkedlist_free(cli->data3);
+    }
+    cli->data3 = NULL; 
+}
+
+void container_cleanup(cli_t * cli) {
+    network_ip_veth_t * network_bridge = hashtable_search(cli->data2, "br", 's');
+    if (NULL != network_bridge) {
+        char cmd[256];
+        snprintf(cmd, sizeof(cmd), "sudo ip link delete br%d", network_bridge->veth_number);
+        if (system(cmd) != 0) {
+            perror("Failed to remove bridge\n");
+        }
+    
+        hashtable_remove(cli->data2, "br", 's');
+        free(network_bridge);
+        network_bridge = NULL;
+    }
+
+    container_free_containers(cli);
+    container_free_bridges_and_veths(cli);
+    container_free_ips(cli);
 }
 
 void container_commands(char * command, cli_t * cli) {
@@ -194,8 +230,8 @@ void container_commands(char * command, cli_t * cli) {
     }
     if (NULL == cli->data3) {
         network_interface_t * network_interface = network_get_host_information();
-        linkedlist_t * linkedlist = network_get_free_ips(network_interface); 
-        cli->data3 = linkedlist;
+        linkedlist_t * ips = network_get_free_ips(network_interface); 
+        cli->data3 = ips;
     }
     if (NULL == hashtable_search(cli->data2, "br", 's')) {
         network_ip_veth_t * network_bridge = network_create_bridge(cli->data3);
