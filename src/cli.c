@@ -12,6 +12,8 @@
 cli_t * cli_initialize(void) {
     // Allocate memory for the cli structure and handle allocation failure.
     cli_t * cli = (cli_t *)malloc(sizeof(cli_t));
+    cli->argc = NULL;
+    cli->argv = NULL;
     if (NULL == cli) {
         printf("Failed to allocate memory for cli\n");
         goto exit;
@@ -79,18 +81,20 @@ exit:
  */
 void cli_free_arguments(cli_t * cli) {
     // Iterates over cli object cli data and frees allocations.
-    if (cli->argc != NULL && cli->argv != NULL) {
-        int index = *cli->argc;
-        for (int i = 0; i < index; i++) {
-            if (cli->argv[i] != NULL) {
-                free(cli->argv[i]);
-                cli->argv[i] = NULL;
+    if (NULL != cli) {
+        if (cli->argc != NULL && cli->argv != NULL) {
+            int index = *cli->argc;
+            for (int i = 0; i < index; i++) {
+                if (cli->argv[i] != NULL) {
+                    free(cli->argv[i]);
+                    cli->argv[i] = NULL;
+                }
             }
+            free(cli->argv);
+            cli->argv = NULL;
+            free(cli->argc);
+            cli->argc = NULL;
         }
-        free(cli->argv);
-        cli->argv = NULL;
-        free(cli->argc);
-        cli->argc = NULL;
     }
 } /* cli_free_arguments() */
 
@@ -108,6 +112,8 @@ char * cli_input(void) {
     int    read;
     // Stores input from standard input into command.
     read = getline(&command, &size, stdin); // this is problematic when sending signal handlers as it doesnt free the memory pointed by command. Although this is probably not a risk, it is still a mem leak.
+    printf("exit flag: %d\n", exit_flag);
+    
     // Handles failure to getline.
     if (read == -1) {
         printf("getline failed\n");

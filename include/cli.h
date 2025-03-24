@@ -20,6 +20,10 @@
 //
 #define MAX_PATH_SIZE 256
 
+#define MAX_ARGS 8
+
+extern volatile sig_atomic_t exit_flag;
+
 // CLI structure that holds the command injected from the user and a valid
 // session.
 //
