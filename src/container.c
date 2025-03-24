@@ -164,6 +164,17 @@ void container_free_containers(cli_t * cli) {
         item_t * item = hashtable->table[i];
         while (item) {
             container_t * container = item->value;
+
+
+            char * container_name = item->key;
+            char cmd[256];
+            snprintf(cmd, sizeof(cmd), "sudo ip netns delete %s", container_name);
+            if (system(cmd) != 0) {
+                perror("Failed to remove netns name\n");
+                return;
+            }
+
+
             free(container->stack_front);
             container->stack_front = NULL;
             free(container);
@@ -219,6 +230,13 @@ void container_cleanup(cli_t * cli) {
     container_free_ips(cli);
 }
 
+void container_list_commands(void) {
+    printf("help - lists all commands available\n");
+    printf("create_container - creates a new container of size n mb\n");
+    printf("delete_container - deletes a container if it is has been created\n");
+    printf("list_containers - lists all current containers that have been created during current session\n");
+}
+
 void container_commands(char * command, cli_t * cli) {
     if (NULL == cli->data1) {
         hashtable_t * containers = hashtable_init();
@@ -231,6 +249,7 @@ void container_commands(char * command, cli_t * cli) {
     if (NULL == cli->data3) {
         network_interface_t * network_interface = network_get_host_information();
         linkedlist_t * ips = network_get_free_ips(network_interface); 
+        free(network_interface);
         cli->data3 = ips;
     }
     if (NULL == hashtable_search(cli->data2, "br", 's')) {
@@ -245,6 +264,8 @@ void container_commands(char * command, cli_t * cli) {
         container_delete(cli->data1, cli->data2);
     } else if (strcmp(command, "list_containers") == 0) {
         container_list_all(cli->data1);
+    } else if (strcmp(command, "help") == 0) {
+        container_list_commands();
     } else if (strcmp(command, "exit") == 0) {
         container_cleanup(cli);
     }
